@@ -7,8 +7,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/getlantern/dns"
 	"github.com/getlantern/golog"
-	"github.com/miekg/dns"
+	"github.com/getlantern/netx"
 )
 
 const (
@@ -43,8 +44,8 @@ func Listen(listenAddr string, defaultDNSServer string) (Server, error) {
 		defaultDNSServer: defaultDNSServer,
 		domains:          make(map[uint32]string, 1000),
 		client: &dns.Client{
-			DialTimeout: 2 * time.Second,
 			ReadTimeout: 2 * time.Second,
+			Dial:        netx.DialTimeout,
 		},
 	}
 
@@ -63,7 +64,6 @@ func Listen(listenAddr string, defaultDNSServer string) (Server, error) {
 }
 
 func (s *server) Serve() error {
-
 	b := make([]byte, maxUDPPacketSize)
 	for {
 		n, remoteAddr, err := s.conn.ReadFromUDP(b)
@@ -73,6 +73,7 @@ func (s *server) Serve() error {
 		}
 		msgIn := &dns.Msg{}
 		msgIn.Unpack(b[:n])
+		log.Debugf("Got Message\n------------------------------\n%v\n------------------------------", msgIn)
 		go s.handle(remoteAddr, msgIn)
 	}
 }
@@ -100,7 +101,7 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 	msgOut.Question = msgIn.Question
 	var unansweredQuestions []dns.Question
 	for _, question := range msgIn.Question {
-		if question.Qclass == dns.ClassINET && question.Qtype == dns.TypeA && question.Name == "www.google.com" {
+		if question.Qclass == dns.ClassINET && question.Qtype == dns.TypeA {
 			answer := &dns.A{}
 			// Short TTL should be fine since these DNS lookups are local and should be quite cheap
 			answer.Hdr = dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 1}

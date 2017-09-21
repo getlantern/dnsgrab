@@ -141,6 +141,7 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 	}
 
 	if len(unansweredQuestions) > 0 {
+		log.Debugf("Unanswered Questions\n------------------------------\n%v\n------------------------------", unansweredQuestions)
 		msgIn.Question = unansweredQuestions
 		resp, _, err := s.client.Exchange(msgIn, s.defaultDNSServer)
 		if err != nil {

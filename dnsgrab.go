@@ -133,6 +133,7 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 			}
 			s.mx.Unlock()
 			answer.A = fakeIP
+			log.Debugf("Returning %v for %v", fakeIP, question.Name)
 			msgOut.Answer = append(msgOut.Answer, answer)
 		} else {
 			unansweredQuestions = append(unansweredQuestions, question)

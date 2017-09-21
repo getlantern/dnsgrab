@@ -50,11 +50,11 @@ func Listen(listenAddr string, defaultDNSServer string) (Server, error) {
 	}
 
 	// TODO: clear out domains after TTL
-	addr, err := net.ResolveUDPAddr("udp", listenAddr)
+	addr, err := net.ResolveUDPAddr("udp4", listenAddr)
 	if err != nil {
 		return nil, err
 	}
-	s.conn, err = net.ListenUDP("udp", addr)
+	s.conn, err = net.ListenUDP("udp4", addr)
 	if err != nil {
 		return nil, err
 	}

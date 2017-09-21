@@ -88,7 +88,6 @@ func (s *server) Serve() error {
 		}
 		msgIn := &dns.Msg{}
 		msgIn.Unpack(b[:n])
-		log.Debugf("Got Message\n------------------------------\n%v\n------------------------------", msgIn)
 		go s.handle(remoteAddr, msgIn)
 	}
 }
@@ -128,12 +127,10 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 			s.ip++
 			if s.ip > maxIP {
 				// wrap IP to stay within allowed range
-				log.Debug("Wrapping")
 				s.ip = minIP
 			}
 			s.mx.Unlock()
 			answer.A = fakeIP
-			log.Debugf("Returning %v for %v", fakeIP, question.Name)
 			msgOut.Answer = append(msgOut.Answer, answer)
 		} else {
 			unansweredQuestions = append(unansweredQuestions, question)
@@ -141,7 +138,6 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 	}
 
 	if len(unansweredQuestions) > 0 {
-		log.Debugf("Unanswered Questions\n------------------------------\n%v\n------------------------------", unansweredQuestions)
 		msgIn.Question = unansweredQuestions
 		resp, _, err := s.client.Exchange(msgIn, s.defaultDNSServer)
 		if err != nil {

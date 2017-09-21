@@ -20,7 +20,11 @@ var (
 
 	endianness = binary.BigEndian
 
-	minIP = ipStringToInt("240.0.0.1")       // Class-E network (reserved for research)
+	// We use Class-E network space for fake IPs, which gives us the ability to
+	// have up to 268435454 addresses in-flight (much more than we can
+	// realistically cache anyway). Class-E is reserved for research, so there
+	// aren't any real Internet services listening on any of these addresses.
+	minIP = ipStringToInt("240.0.0.1")       // begin of Class-E network
 	maxIP = ipStringToInt("255.255.255.254") // end of Class-E network
 )
 

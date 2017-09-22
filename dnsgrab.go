@@ -120,10 +120,11 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 			// Short TTL should be fine since these DNS lookups are local and should be quite cheap
 			answer.Hdr = dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 1}
 			fakeIP := make(net.IP, 4)
+			name := stripTrailingDot(question.Name)
 			s.mx.Lock()
 			endianness.PutUint32(fakeIP, s.ip)
 			// Remember the query
-			s.domains[s.ip] = question.Name
+			s.domains[s.ip] = name
 			s.ip++
 			if s.ip > maxIP {
 				// wrap IP to stay within allowed range
@@ -166,4 +167,12 @@ func intToIP(i uint32) net.IP {
 	ip := make(net.IP, net.IPv4len)
 	endianness.PutUint32(ip, i)
 	return ip
+}
+
+func stripTrailingDot(name string) string {
+	// strip trailing dot
+	if name[len(name)-1] == '.' {
+		name = name[:len(name)-1]
+	}
+	return name
 }

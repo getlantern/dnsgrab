@@ -1,6 +1,7 @@
 package dnsgrab
 
 import (
+	"container/list"
 	"encoding/binary"
 	"net"
 	"sync"
@@ -32,6 +33,9 @@ var (
 // addresses within the Class-E address space and allows reverse resolution of
 // those back into the originally queried hostname.
 type Server interface {
+	// LocalAddr() returns the address at which this server is listening
+	LocalAddr() net.Addr
+
 	// Serve() runs the server (blocks until server ends)
 	Serve() error
 
@@ -43,20 +47,26 @@ type Server interface {
 }
 
 type server struct {
+	cacheSize        int
 	defaultDNSServer string
 	conn             *net.UDPConn
 	client           *dns.Client
 	ip               uint32
-	domains          map[uint32]string
+	namesByIP        map[uint32]*list.Element
+	ipsByName        map[string]uint32
+	ll               *list.List
 	mx               sync.RWMutex
 }
 
 // Listen creates a new server listening at the given listenAddr and that
 // forwards queries it can't handle to the given defaultDNSServer.
-func Listen(listenAddr string, defaultDNSServer string) (Server, error) {
+func Listen(cacheSize int, listenAddr string, defaultDNSServer string) (Server, error) {
 	s := &server{
+		cacheSize:        cacheSize,
 		defaultDNSServer: defaultDNSServer,
-		domains:          make(map[uint32]string, 1000),
+		namesByIP:        make(map[uint32]*list.Element, cacheSize),
+		ipsByName:        make(map[string]uint32, cacheSize),
+		ll:               list.New(),
 		client: &dns.Client{
 			ReadTimeout: 2 * time.Second,
 			Dial:        netx.DialTimeout,
@@ -64,7 +74,6 @@ func Listen(listenAddr string, defaultDNSServer string) (Server, error) {
 		ip: minIP,
 	}
 
-	// TODO: clear out domains after TTL
 	addr, err := net.ResolveUDPAddr("udp4", listenAddr)
 	if err != nil {
 		return nil, err
@@ -76,6 +85,10 @@ func Listen(listenAddr string, defaultDNSServer string) (Server, error) {
 
 	log.Debugf("Listening at: %v", s.conn.LocalAddr())
 	return s, nil
+}
+
+func (s *server) LocalAddr() net.Addr {
+	return s.conn.LocalAddr()
 }
 
 func (s *server) Serve() error {
@@ -99,9 +112,12 @@ func (s *server) Close() error {
 func (s *server) ReverseLookup(ip net.IP) string {
 	ipInt := ipToInt(ip)
 	s.mx.RLock()
-	result := s.domains[ipInt]
+	result, found := s.namesByIP[ipInt]
 	s.mx.RUnlock()
-	return result
+	if !found {
+		return ""
+	}
+	return result.Value.(string)
 }
 
 func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
@@ -122,14 +138,36 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 			fakeIP := make(net.IP, 4)
 			name := stripTrailingDot(question.Name)
 			s.mx.Lock()
-			endianness.PutUint32(fakeIP, s.ip)
-			// Remember the query
-			s.domains[s.ip] = name
-			s.ip++
-			if s.ip > maxIP {
-				// wrap IP to stay within allowed range
-				s.ip = minIP
+			ip, found := s.ipsByName[name]
+			if found {
+				e := s.namesByIP[ip]
+				// move to front of LRU list
+				s.ll.MoveToFront(e)
+			} else {
+				// get next fake IP from sequence
+				ip = s.ip
+
+				// insert to front of LRU list
+				e := s.ll.PushFront(name)
+				s.namesByIP[ip] = e
+				s.ipsByName[name] = ip
+
+				// remove oldest from LRU list if necessary
+				if len(s.namesByIP) > s.cacheSize {
+					oldestName := s.ll.Back().Value.(string)
+					oldestIP := s.ipsByName[oldestName]
+					delete(s.namesByIP, oldestIP)
+					delete(s.ipsByName, oldestName)
+				}
+
+				// advance sequence
+				s.ip++
+				if s.ip > maxIP {
+					// wrap IP to stay within allowed range
+					s.ip = minIP
+				}
 			}
+			endianness.PutUint32(fakeIP, ip)
 			s.mx.Unlock()
 			answer.A = fakeIP
 			msgOut.Answer = append(msgOut.Answer, answer)

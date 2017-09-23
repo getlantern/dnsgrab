@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	s, err := dnsgrab.Listen(":55899", "8.8.8.8:53")
+	s, err := dnsgrab.Listen(2, ":55899", "8.8.8.8:53")
 	if err != nil {
 		fmt.Println(err)
 		return

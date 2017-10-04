@@ -190,7 +190,10 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	s.conn.WriteToUDP(bo, remoteAddr)
+	_, writeErr := s.conn.WriteToUDP(bo, remoteAddr)
+	if writeErr != nil {
+		log.Errorf("Error responding to DNS query: %v", writeErr)
+	}
 }
 
 func ipStringToInt(ip string) uint32 {

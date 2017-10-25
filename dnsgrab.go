@@ -61,6 +61,12 @@ type server struct {
 // Listen creates a new server listening at the given listenAddr and that
 // forwards queries it can't handle to the given defaultDNSServer.
 func Listen(cacheSize int, listenAddr string, defaultDNSServer string) (Server, error) {
+	_, _, err := net.SplitHostPort(defaultDNSServer)
+	if err != nil {
+		defaultDNSServer = defaultDNSServer + ":53"
+		log.Debugf("Defaulted port for defaultDNSServer to 53: %v", defaultDNSServer)
+	}
+
 	s := &server{
 		cacheSize:        cacheSize,
 		defaultDNSServer: defaultDNSServer,

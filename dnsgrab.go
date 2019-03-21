@@ -141,41 +141,13 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 			answer := &dns.A{}
 			// Short TTL should be fine since these DNS lookups are local and should be quite cheap
 			answer.Hdr = dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 1}
-			fakeIP := make(net.IP, 4)
 			name := stripTrailingDot(question.Name)
-			s.mx.Lock()
-			ip, found := s.ipsByName[name]
-			if found {
-				e := s.namesByIP[ip]
-				// move to front of LRU list
-				s.ll.MoveToFront(e)
-			} else {
-				// get next fake IP from sequence
-				ip = s.ip
-
-				// insert to front of LRU list
-				e := s.ll.PushFront(name)
-				s.namesByIP[ip] = e
-				s.ipsByName[name] = ip
-
-				// remove oldest from LRU list if necessary
-				if len(s.namesByIP) > s.cacheSize {
-					oldestName := s.ll.Back().Value.(string)
-					oldestIP := s.ipsByName[oldestName]
-					delete(s.namesByIP, oldestIP)
-					delete(s.ipsByName, oldestName)
-				}
-
-				// advance sequence
-				s.ip++
-				if s.ip > maxIP {
-					// wrap IP to stay within allowed range
-					s.ip = minIP
-				}
+			answerIP := net.ParseIP(name)
+			if answerIP == nil {
+				// Only map to fake IP if supplied wasn't an IP to begin with
+				answerIP = s.mapToFakeIP(name)
 			}
-			endianness.PutUint32(fakeIP, ip)
-			s.mx.Unlock()
-			answer.A = fakeIP
+			answer.A = answerIP
 			msgOut.Answer = append(msgOut.Answer, answer)
 		} else {
 			unansweredQuestions = append(unansweredQuestions, question)
@@ -200,6 +172,43 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 	if writeErr != nil {
 		log.Errorf("Error responding to DNS query: %v", writeErr)
 	}
+}
+
+func (s *server) mapToFakeIP(name string) net.IP {
+	s.mx.Lock()
+	ip, found := s.ipsByName[name]
+	if found {
+		e := s.namesByIP[ip]
+		// move to front of LRU list
+		s.ll.MoveToFront(e)
+	} else {
+		// get next fake IP from sequence
+		ip = s.ip
+
+		// insert to front of LRU list
+		e := s.ll.PushFront(name)
+		s.namesByIP[ip] = e
+		s.ipsByName[name] = ip
+
+		// remove oldest from LRU list if necessary
+		if len(s.namesByIP) > s.cacheSize {
+			oldestName := s.ll.Back().Value.(string)
+			oldestIP := s.ipsByName[oldestName]
+			delete(s.namesByIP, oldestIP)
+			delete(s.ipsByName, oldestName)
+		}
+
+		// advance sequence
+		s.ip++
+		if s.ip > maxIP {
+			// wrap IP to stay within allowed range
+			s.ip = minIP
+		}
+	}
+	fakeIP := make(net.IP, 4)
+	endianness.PutUint32(fakeIP, ip)
+	s.mx.Unlock()
+	return fakeIP
 }
 
 func ipStringToInt(ip string) uint32 {

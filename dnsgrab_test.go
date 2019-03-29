@@ -19,7 +19,7 @@ func TestBasic(t *testing.T) {
 
 	addr := s.LocalAddr().String()
 
-	test := func(name string, expectedIP string, condition string, reversible bool) {
+	test := func(name string, expectedIP string, condition string) {
 		q := &dns.Msg{}
 		q.SetQuestion(name+".", dns.TypeA)
 
@@ -29,15 +29,12 @@ func TestBasic(t *testing.T) {
 		}
 
 		assert.Equal(t, fmt.Sprintf("%s.	1	IN	A	%s", name, expectedIP), a.Answer[0].String(), "Wrong IP from query for '%v'", condition)
-		if reversible {
-			assert.Equal(t, name, s.ReverseLookup(net.ParseIP(expectedIP)), "Wrong name from reverse lookup for '%v'", condition)
-		}
+		assert.Equal(t, name, s.ReverseLookup(net.ParseIP(expectedIP)), "Wrong name from reverse lookup for '%v'", condition)
 	}
 
-	test("domain1", "240.0.0.1", "first query, new IP", true)
-	test("domain2", "240.0.0.2", "second query, new IP", true)
-	test("domain1", "240.0.0.1", "repeated query, same IP", true)
-	test("domain3", "240.0.0.3", "third query, new IP", true)
-	test("domain4", "240.0.0.4", "repeated expired query, new IP", true)
-	test("127.0.0.1", "127.0.0.1", "ip should resolve to itself", false)
+	test("domain1", "240.0.0.1", "first query, new IP")
+	test("domain2", "240.0.0.2", "second query, new IP")
+	test("domain1", "240.0.0.1", "repeated query, same IP")
+	test("domain3", "240.0.0.3", "third query, new IP")
+	test("domain4", "240.0.0.4", "repeated expired query, new IP")
 }

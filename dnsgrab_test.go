@@ -2,7 +2,7 @@ package dnsgrab
 
 import (
 	"fmt"
-	"net"
+	"strings"
 	"testing"
 
 	"github.com/getlantern/dns"
@@ -29,7 +29,18 @@ func TestBasic(t *testing.T) {
 		}
 
 		assert.Equal(t, fmt.Sprintf("%s.	1	IN	A	%s", name, expectedIP), a.Answer[0].String(), "Wrong IP from query for '%v'", condition)
-		assert.Equal(t, name, s.ReverseLookup(net.ParseIP(expectedIP)), "Wrong name from reverse lookup for '%v'", condition)
+
+		q = &dns.Msg{}
+		parts := strings.Split(expectedIP, ".")
+		parts[0], parts[1], parts[2], parts[3] = parts[3], parts[2], parts[1], parts[0]
+		ipQuery := strings.Join(parts, ".") + ".in-addr.arpa."
+		q.SetQuestion(ipQuery, dns.TypePTR)
+
+		a, err = dns.Exchange(q, addr)
+		if !assert.NoError(t, err) {
+			return
+		}
+		assert.Equal(t, name+".", a.Answer[0].(*dns.PTR).Ptr, "Wrong name from reverse lookup for '%v'", condition)
 	}
 
 	test("domain1", "240.0.0.1", "first query, new IP")

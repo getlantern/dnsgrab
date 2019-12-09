@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"encoding/binary"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -137,52 +138,77 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 	msgOut.Question = msgIn.Question
 	var unansweredQuestions []dns.Question
 	for _, question := range msgIn.Question {
-		if question.Qclass == dns.ClassINET && question.Qtype == dns.TypeA {
-			answer := &dns.A{}
-			// Short TTL should be fine since these DNS lookups are local and should be quite cheap
-			answer.Hdr = dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 1}
-			fakeIP := make(net.IP, 4)
-			name := stripTrailingDot(question.Name)
-			s.mx.Lock()
-			ip, found := s.ipsByName[name]
-			if found {
-				e := s.namesByIP[ip]
-				// move to front of LRU list
-				s.ll.MoveToFront(e)
-			} else {
-				// get next fake IP from sequence
-				ip = s.ip
+		if question.Qclass == dns.ClassINET {
+			if question.Qtype == dns.TypeA {
+				answer := &dns.A{}
+				// Short TTL should be fine since these DNS lookups are local and should be quite cheap
+				answer.Hdr = dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 1}
+				fakeIP := make(net.IP, 4)
+				name := stripTrailingDot(question.Name)
+				s.mx.Lock()
+				ip, found := s.ipsByName[name]
+				if found {
+					e := s.namesByIP[ip]
+					// move to front of LRU list
+					s.ll.MoveToFront(e)
+				} else {
+					// get next fake IP from sequence
+					ip = s.ip
 
-				// insert to front of LRU list
-				e := s.ll.PushFront(name)
-				s.namesByIP[ip] = e
-				s.ipsByName[name] = ip
+					// insert to front of LRU list
+					e := s.ll.PushFront(name)
+					s.namesByIP[ip] = e
+					s.ipsByName[name] = ip
 
-				// remove oldest from LRU list if necessary
-				if len(s.namesByIP) > s.cacheSize {
-					oldestName := s.ll.Back().Value.(string)
-					oldestIP := s.ipsByName[oldestName]
-					delete(s.namesByIP, oldestIP)
-					delete(s.ipsByName, oldestName)
+					// remove oldest from LRU list if necessary
+					if len(s.namesByIP) > s.cacheSize {
+						oldestName := s.ll.Back().Value.(string)
+						oldestIP := s.ipsByName[oldestName]
+						delete(s.namesByIP, oldestIP)
+						delete(s.ipsByName, oldestName)
+					}
+
+					// advance sequence
+					s.ip++
+					if s.ip > maxIP {
+						// wrap IP to stay within allowed range
+						s.ip = minIP
+					}
 				}
-
-				// advance sequence
-				s.ip++
-				if s.ip > maxIP {
-					// wrap IP to stay within allowed range
-					s.ip = minIP
+				endianness.PutUint32(fakeIP, ip)
+				s.mx.Unlock()
+				log.Debugf("resolved %v -> %v", name, fakeIP.String())
+				answer.A = fakeIP
+				msgOut.Answer = append(msgOut.Answer, answer)
+			} else if question.Qtype == dns.TypePTR {
+				answer := &dns.PTR{}
+				// Short TTL should be fine since these DNS lookups are local and should be quite cheap
+				answer.Hdr = dns.RR_Header{Name: question.Name, Rrtype: dns.TypePTR, Class: dns.ClassINET, Ttl: 1}
+				parts := strings.Split(question.Name, ".")
+				if len(parts) >= 4 {
+					parts = parts[:4]
+					parts[0], parts[1], parts[2], parts[3] = parts[3], parts[2], parts[1], parts[0]
+					ipString := strings.Join(parts, ".")
+					ip := net.ParseIP(ipString).To4()
+					ipInt := ipToInt(ip)
+					s.mx.Lock()
+					name, found := s.namesByIP[ipInt]
+					s.mx.Unlock()
+					if found {
+						foundName := name.Value.(string)
+						log.Debugf("reversed %v -> %v", question.Name, foundName)
+						answer.Ptr = foundName + "."
+						msgOut.Answer = append(msgOut.Answer, answer)
+					}
 				}
 			}
-			endianness.PutUint32(fakeIP, ip)
-			s.mx.Unlock()
-			answer.A = fakeIP
-			msgOut.Answer = append(msgOut.Answer, answer)
 		} else {
 			unansweredQuestions = append(unansweredQuestions, question)
 		}
 	}
 
 	if len(unansweredQuestions) > 0 {
+		log.Debugf("Passing unanswered questions along: %v", unansweredQuestions)
 		msgIn.Question = unansweredQuestions
 		resp, _, err := s.client.Exchange(msgIn, s.defaultDNSServer)
 		if err != nil {

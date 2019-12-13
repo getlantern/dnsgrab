@@ -190,15 +190,17 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 					parts[0], parts[1], parts[2], parts[3] = parts[3], parts[2], parts[1], parts[0]
 					ipString := strings.Join(parts, ".")
 					ip := net.ParseIP(ipString).To4()
-					ipInt := ipToInt(ip)
-					s.mx.Lock()
-					name, found := s.namesByIP[ipInt]
-					s.mx.Unlock()
-					if found {
-						foundName := name.Value.(string)
-						log.Debugf("reversed %v -> %v", question.Name, foundName)
-						answer.Ptr = foundName + "."
-						msgOut.Answer = append(msgOut.Answer, answer)
+					if len(ip) == 4 {
+						ipInt := ipToInt(ip)
+						s.mx.Lock()
+						name, found := s.namesByIP[ipInt]
+						s.mx.Unlock()
+						if found {
+							foundName := name.Value.(string)
+							log.Debugf("reversed %v -> %v", question.Name, foundName)
+							answer.Ptr = foundName + "."
+							msgOut.Answer = append(msgOut.Answer, answer)
+						}
 					}
 				}
 			}

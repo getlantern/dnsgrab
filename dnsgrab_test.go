@@ -1,7 +1,6 @@
 package dnsgrab
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -28,7 +27,8 @@ func TestBasic(t *testing.T) {
 			return
 		}
 
-		assert.Equal(t, fmt.Sprintf("%s.	1	IN	A	%s", name, expectedIP), a.Answer[0].String(), "Wrong IP from query for '%v'", condition)
+		fakeIP := a.Answer[0].(*dns.A).A
+		assert.Equal(t, expectedIP, fakeIP.String(), "Wrong IP from query for '%v'", condition)
 
 		q = &dns.Msg{}
 		parts := strings.Split(expectedIP, ".")
@@ -41,6 +41,7 @@ func TestBasic(t *testing.T) {
 			return
 		}
 		assert.Equal(t, name+".", a.Answer[0].(*dns.PTR).Ptr, "Wrong name from reverse lookup for '%v'", condition)
+		assert.Equal(t, name, s.ReverseLookup(fakeIP))
 	}
 
 	test("domain1", "240.0.0.1", "first query, new IP")

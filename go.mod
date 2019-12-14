@@ -1,6 +1,6 @@
 module github.com/getlantern/dnsgrab
 
-go 1.13
+go 1.12
 
 require (
 	github.com/getlantern/dns v0.0.0-20170920204204-630ccc2c3041

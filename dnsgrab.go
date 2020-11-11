@@ -46,8 +46,9 @@ type Server interface {
 	// ProcessQuery processes a DNS query and returns the response bytes.
 	ProcessQuery(b []byte) ([]byte, error)
 
-	// ReverseLookup resolves the given fake IP address into the original hostname
-	ReverseLookup(ip net.IP) string
+	// ReverseLookup resolves the given fake IP address into the original hostname. If the given IP is not a fake IP,
+	// this simply returns the provided IP in string form. If the IP is not found, this returns false.
+	ReverseLookup(ip net.IP) (string, bool)
 }
 
 type server struct {
@@ -117,15 +118,18 @@ func (s *server) Close() error {
 	return s.conn.Close()
 }
 
-func (s *server) ReverseLookup(ip net.IP) string {
+func (s *server) ReverseLookup(ip net.IP) (string, bool) {
 	ipInt := ipToInt(ip)
+	if ipInt < minIP || ipInt > maxIP {
+		return ip.String(), true
+	}
 	s.mx.RLock()
 	result, found := s.namesByIP[ipInt]
 	s.mx.RUnlock()
 	if !found {
-		return ""
+		return "", false
 	}
-	return result.Value.(string)
+	return result.Value.(string), true
 }
 
 func (s *server) ProcessQuery(b []byte) ([]byte, error) {

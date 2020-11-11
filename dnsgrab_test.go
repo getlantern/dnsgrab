@@ -7,13 +7,12 @@ import (
 
 	"github.com/getlantern/dns"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBasic(t *testing.T) {
 	s, err := Listen(2, ":0", "8.8.8.8")
-	if !assert.NoError(t, err) {
-		return
-	}
+	require.NoError(t, err)
 	defer s.Close()
 	go s.Serve()
 
@@ -42,7 +41,15 @@ func TestBasic(t *testing.T) {
 			return
 		}
 		assert.Equal(t, name+".", a.Answer[0].(*dns.PTR).Ptr, "Wrong name from reverse lookup for '%v'", condition)
-		assert.Equal(t, name, s.ReverseLookup(fakeIP))
+		reversed, ok := s.ReverseLookup(fakeIP)
+		require.True(t, ok, "Reverse lookup failed for '%v'", condition)
+		assert.Equal(t, name, reversed, "Wrong reverse lookup for '%v'", condition)
+	}
+
+	testUnknown := func(name string, succeed bool, ip string, condition string) {
+		reversed, ok := s.ReverseLookup(net.ParseIP(ip))
+		require.Equal(t, succeed, ok, "Unexpected reverse lookup status for '%v'", condition)
+		assert.Equal(t, name, reversed, "Wrong reverse lookup for '%v'", condition)
 	}
 
 	test("domain1", "240.0.0.1", "first query, new IP")
@@ -51,18 +58,17 @@ func TestBasic(t *testing.T) {
 	test("domain3", "240.0.0.3", "third query, new IP")
 	test("domain4", "240.0.0.4", "repeated expired query, new IP")
 
+	testUnknown("172.155.98.32", true, "172.155.98.32", "regular IP address")
+	testUnknown("", false, "240.0.10.10", "unknown fake IP address")
+
 	// Also test that SRP lookups for unknown IPs get passed through
 	host := "dfw28s05-in-f4.1e100.net"
 	ip, err := net.ResolveIPAddr("ip4", host)
-	if !assert.NoError(t, err) {
-		return
-	}
+	require.NoError(t, err)
 
 	q := makeSRPQuery(ip.String())
 	a, err := dns.Exchange(q, addr)
-	if !assert.NoError(t, err) {
-		return
-	}
+	require.NoError(t, err)
 	if assert.Len(t, a.Answer, 1) {
 		assert.Equal(t, host+".", a.Answer[0].(*dns.PTR).Ptr, "Wrong name from reverse lookup of %v", host)
 	}

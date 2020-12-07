@@ -165,6 +165,7 @@ func (s *server) ProcessQuery(b []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		log.Debugf("Response to unanswered questions %v: %v", unansweredQuestions, msgOut.Answer)
 		msgOut.Answer = append(msgOut.Answer, resp.Answer...)
 	}
 

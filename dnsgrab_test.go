@@ -73,7 +73,15 @@ func doTest(t *testing.T, cache Cache, startingIP uint32) {
 		}
 		log.Debugf("Num answers: %d", len(a.Answer))
 		assert.Equal(t, name+".", a.Answer[0].(*dns.PTR).Ptr, "Wrong name from reverse lookup for '%v'", condition)
-		assert.Equal(t, name, s.ReverseLookup(fakeIP))
+		reversed, ok := s.ReverseLookup(fakeIP)
+		require.True(t, ok, "Reverse lookup failed for '%v'", condition)
+		assert.Equal(t, name, reversed, "Wrong reverse lookup for '%v'", condition)
+	}
+
+	testUnknown := func(name string, succeed bool, ip string, condition string) {
+		reversed, ok := s.ReverseLookup(net.ParseIP(ip))
+		require.Equal(t, succeed, ok, "Unexpected reverse lookup status for '%v'", condition)
+		assert.Equal(t, name, reversed, "Wrong reverse lookup for '%v'", condition)
 	}
 
 	test("domain1", startingIP, "first query, new IP")
@@ -85,6 +93,9 @@ func doTest(t *testing.T, cache Cache, startingIP uint32) {
 	test("domain3", startingIP+2, "third query, new IP")
 	time.Sleep(500 * time.Millisecond)
 	test("domain2", startingIP+3, "repeated expired query, new IP")
+
+	testUnknown("172.155.98.32", true, "172.155.98.32", "regular IP address")
+	testUnknown("", false, "240.0.10.10", "unknown fake IP address")
 
 	// Also test that SRP lookups for unknown IPs get passed through
 	host := "dfw28s05-in-f4.1e100.net"

@@ -33,8 +33,12 @@ type Server interface {
 	// Close closes the server's network listener.
 	Close() error
 
-	// ReverseLookup resolves the given fake IP address into the original hostname
-	ReverseLookup(ip net.IP) string
+	// ProcessQuery processes a DNS query and returns the response bytes.
+	ProcessQuery(b []byte) ([]byte, error)
+
+	// ReverseLookup resolves the given fake IP address into the original hostname. If the given IP is not a fake IP,
+	// this simply returns the provided IP in string form. If the IP is not found, this returns false.
+	ReverseLookup(ip net.IP) (string, bool)
 }
 
 // Cache defines the API for a cache of names to IPs and vice versa
@@ -109,9 +113,7 @@ func (s *server) Serve() error {
 			}
 			continue
 		}
-		msgIn := &dns.Msg{}
-		msgIn.Unpack(b[:n])
-		go s.handle(remoteAddr, msgIn)
+		go s.handle(b[:n], remoteAddr)
 	}
 }
 
@@ -119,17 +121,24 @@ func (s *server) Close() error {
 	return s.conn.Close()
 }
 
-func (s *server) ReverseLookup(ip net.IP) string {
+func (s *server) ReverseLookup(ip net.IP) (string, bool) {
+	ipInt := common.IPToInt(ip)
+	if ipInt < common.MinIP || ipInt > common.MaxIP {
+		return ip.String(), true
+	}
 	s.mx.RLock()
 	result, found := s.cache.NameByIP(ip.To4())
 	s.mx.RUnlock()
 	if !found {
-		return ""
+		return "", false
 	}
-	return result
+	return result, true
 }
 
-func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
+func (s *server) ProcessQuery(b []byte) ([]byte, error) {
+	msgIn := &dns.Msg{}
+	msgIn.Unpack(b)
+
 	if len(msgIn.Question) == 0 {
 		// TODO: forward the message upstream
 	}
@@ -154,16 +163,21 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 		msgIn.Question = unansweredQuestions
 		resp, _, err := s.client.Exchange(msgIn, s.defaultDNSServer)
 		if err != nil {
-			log.Error(err)
-		} else {
-			msgOut.Answer = append(msgOut.Answer, resp.Answer...)
+			return nil, err
 		}
+		msgOut.Answer = append(msgOut.Answer, resp.Answer...)
 	}
 
-	bo, err := msgOut.Pack()
+	return msgOut.Pack()
+}
+
+func (s *server) handle(b []byte, remoteAddr *net.UDPAddr) {
+	bo, err := s.ProcessQuery(b)
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err)
+		return
 	}
+
 	_, writeErr := s.conn.WriteToUDP(bo, remoteAddr)
 	if writeErr != nil {
 		log.Errorf("Error responding to DNS query: %v", writeErr)

@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	endianness = binary.BigEndian
+	Endianness = binary.BigEndian
 
 	// We use Class-E network space for fake IPs, which gives us the ability to
 	// have up to 268435454 addresses in-flight (much more than we can
@@ -23,11 +23,11 @@ func IPStringToInt(ip string) uint32 {
 }
 
 func IPToInt(ip net.IP) uint32 {
-	return endianness.Uint32(ip.To4())
+	return Endianness.Uint32(ip.To4())
 }
 
 func IntToIP(i uint32) net.IP {
 	ip := make(net.IP, net.IPv4len)
-	endianness.PutUint32(ip, i)
+	Endianness.PutUint32(ip, i)
 	return ip
 }

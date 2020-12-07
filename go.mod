@@ -7,4 +7,5 @@ require (
 	github.com/getlantern/golog v0.0.0-20190830074920-4ef2e798c2d7
 	github.com/getlantern/netx v0.0.0-20190110220209-9912de6f94fd
 	github.com/stretchr/testify v1.4.0
+	go.etcd.io/bbolt v1.3.5
 )

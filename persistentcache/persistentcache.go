@@ -57,7 +57,7 @@ type PersistentCache struct {
 }
 
 func New(filename string, maxAge time.Duration) (*PersistentCache, error) {
-	db, err := bolt.Open(filename, 0755, nil)
+	db, err := bolt.Open(filename, 0644, nil)
 	if err != nil {
 		return nil, err
 	}

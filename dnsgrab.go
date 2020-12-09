@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/getlantern/dns"
-	"github.com/getlantern/dnsgrab/common"
+	"github.com/getlantern/dnsgrab/internal"
 	"github.com/getlantern/golog"
 	"github.com/getlantern/netx"
 )
@@ -122,8 +122,8 @@ func (s *server) Close() error {
 }
 
 func (s *server) ReverseLookup(ip net.IP) (string, bool) {
-	ipInt := common.IPToInt(ip)
-	if ipInt < common.MinIP || ipInt > common.MaxIP {
+	ipInt := internal.IPToInt(ip)
+	if ipInt < internal.MinIP || ipInt > internal.MaxIP {
 		return ip.String(), true
 	}
 	s.mx.RLock()
@@ -195,7 +195,7 @@ func (s *server) processAQuestion(question dns.Question) dns.RR {
 		s.cache.MarkFresh(name, ip)
 	} else {
 		// get next fake IP from sequence
-		ip = common.IntToIP(s.cache.NextSequence())
+		ip = internal.IntToIP(s.cache.NextSequence())
 		s.cache.Add(name, ip)
 	}
 	fakeIP := net.IP(ip)

@@ -1,4 +1,4 @@
-package common
+package internal
 
 import (
 	"encoding/binary"
@@ -14,7 +14,7 @@ var (
 	// aren't any real Internet services listening on any of these addresses.
 	MinIP = IPStringToInt("240.0.0.1") // begin of Class-E network
 
-	// MaxIP is the of Class-E network
+	// MaxIP is the end of Class-E network
 	MaxIP = IPStringToInt("255.255.255.254")
 )
 

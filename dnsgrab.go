@@ -1,14 +1,13 @@
 package dnsgrab
 
 import (
-	"container/list"
-	"encoding/binary"
 	"net"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/getlantern/dns"
+	"github.com/getlantern/dnsgrab/internal"
 	"github.com/getlantern/golog"
 	"github.com/getlantern/netx"
 )
@@ -19,15 +18,6 @@ const (
 
 var (
 	log = golog.LoggerFor("dnsgrab")
-
-	endianness = binary.BigEndian
-
-	// We use Class-E network space for fake IPs, which gives us the ability to
-	// have up to 268435454 addresses in-flight (much more than we can
-	// realistically cache anyway). Class-E is reserved for research, so there
-	// aren't any real Internet services listening on any of these addresses.
-	minIP = ipStringToInt("240.0.0.1")       // begin of Class-E network
-	maxIP = ipStringToInt("255.255.255.254") // end of Class-E network
 )
 
 // Server is a dns server that resolves queries for A records into fake IP
@@ -43,25 +33,44 @@ type Server interface {
 	// Close closes the server's network listener.
 	Close() error
 
-	// ReverseLookup resolves the given fake IP address into the original hostname
-	ReverseLookup(ip net.IP) string
+	// ProcessQuery processes a DNS query and returns the response bytes.
+	ProcessQuery(b []byte) ([]byte, error)
+
+	// ReverseLookup resolves the given fake IP address into the original hostname. If the given IP is not a fake IP,
+	// this simply returns the provided IP in string form. If the IP is not found, this returns false.
+	ReverseLookup(ip net.IP) (string, bool)
+}
+
+// Cache defines the API for a cache of names to IPs and vice versa
+type Cache interface {
+	NameByIP(ip []byte) (name string, found bool)
+
+	IPByName(name string) (ip []byte, found bool)
+
+	Add(name string, ip []byte)
+
+	MarkFresh(name string, ip []byte)
+
+	NextSequence() uint32
 }
 
 type server struct {
-	cacheSize        int
+	cache            Cache
 	defaultDNSServer string
 	conn             *net.UDPConn
 	client           *dns.Client
-	ip               uint32
-	namesByIP        map[uint32]*list.Element
-	ipsByName        map[string]uint32
-	ll               *list.List
 	mx               sync.RWMutex
 }
 
 // Listen creates a new server listening at the given listenAddr and that
-// forwards queries it can't handle to the given defaultDNSServer.
+// forwards queries it can't handle to the given defaultDNSServer. It uses an
+// in-memory cache constrained by cacheSize.
 func Listen(cacheSize int, listenAddr string, defaultDNSServer string) (Server, error) {
+	return ListenWithCache(listenAddr, defaultDNSServer, NewInMemoryCache(cacheSize))
+}
+
+// ListenWithCache is like Listen but taking any Cache implementation.
+func ListenWithCache(listenAddr string, defaultDNSServer string, cache Cache) (Server, error) {
 	_, _, err := net.SplitHostPort(defaultDNSServer)
 	if err != nil {
 		defaultDNSServer = defaultDNSServer + ":53"
@@ -69,16 +78,12 @@ func Listen(cacheSize int, listenAddr string, defaultDNSServer string) (Server, 
 	}
 
 	s := &server{
-		cacheSize:        cacheSize,
+		cache:            cache,
 		defaultDNSServer: defaultDNSServer,
-		namesByIP:        make(map[uint32]*list.Element, cacheSize),
-		ipsByName:        make(map[string]uint32, cacheSize),
-		ll:               list.New(),
 		client: &dns.Client{
 			ReadTimeout: 2 * time.Second,
 			Dial:        netx.DialTimeout,
 		},
-		ip: minIP,
 	}
 
 	addr, err := net.ResolveUDPAddr("udp4", listenAddr)
@@ -103,12 +108,12 @@ func (s *server) Serve() error {
 	for {
 		n, remoteAddr, err := s.conn.ReadFromUDP(b)
 		if err != nil {
-			log.Error(err)
+			if !strings.Contains(err.Error(), "use of closed") {
+				log.Error(err)
+			}
 			continue
 		}
-		msgIn := &dns.Msg{}
-		msgIn.Unpack(b[:n])
-		go s.handle(remoteAddr, msgIn)
+		go s.handle(b[:n], remoteAddr)
 	}
 }
 
@@ -116,18 +121,24 @@ func (s *server) Close() error {
 	return s.conn.Close()
 }
 
-func (s *server) ReverseLookup(ip net.IP) string {
-	ipInt := ipToInt(ip)
+func (s *server) ReverseLookup(ip net.IP) (string, bool) {
+	ipInt := internal.IPToInt(ip)
+	if ipInt < internal.MinIP || ipInt > internal.MaxIP {
+		return ip.String(), true
+	}
 	s.mx.RLock()
-	result, found := s.namesByIP[ipInt]
+	result, found := s.cache.NameByIP(ip.To4())
 	s.mx.RUnlock()
 	if !found {
-		return ""
+		return "", false
 	}
-	return result.Value.(string)
+	return result, true
 }
 
-func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
+func (s *server) ProcessQuery(b []byte) ([]byte, error) {
+	msgIn := &dns.Msg{}
+	msgIn.Unpack(b)
+
 	if len(msgIn.Question) == 0 {
 		// TODO: forward the message upstream
 	}
@@ -152,16 +163,21 @@ func (s *server) handle(remoteAddr *net.UDPAddr, msgIn *dns.Msg) {
 		msgIn.Question = unansweredQuestions
 		resp, _, err := s.client.Exchange(msgIn, s.defaultDNSServer)
 		if err != nil {
-			log.Error(err)
-		} else {
-			msgOut.Answer = append(msgOut.Answer, resp.Answer...)
+			return nil, err
 		}
+		msgOut.Answer = append(msgOut.Answer, resp.Answer...)
 	}
 
-	bo, err := msgOut.Pack()
+	return msgOut.Pack()
+}
+
+func (s *server) handle(b []byte, remoteAddr *net.UDPAddr) {
+	bo, err := s.ProcessQuery(b)
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err)
+		return
 	}
+
 	_, writeErr := s.conn.WriteToUDP(bo, remoteAddr)
 	if writeErr != nil {
 		log.Errorf("Error responding to DNS query: %v", writeErr)
@@ -172,39 +188,17 @@ func (s *server) processAQuestion(question dns.Question) dns.RR {
 	answer := &dns.A{}
 	// Short TTL should be fine since these DNS lookups are local and should be quite cheap
 	answer.Hdr = dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 1}
-	fakeIP := make(net.IP, 4)
 	name := stripTrailingDot(question.Name)
 	s.mx.Lock()
-	ip, found := s.ipsByName[name]
+	ip, found := s.cache.IPByName(name)
 	if found {
-		e := s.namesByIP[ip]
-		// move to front of LRU list
-		s.ll.MoveToFront(e)
+		s.cache.MarkFresh(name, ip)
 	} else {
 		// get next fake IP from sequence
-		ip = s.ip
-
-		// insert to front of LRU list
-		e := s.ll.PushFront(name)
-		s.namesByIP[ip] = e
-		s.ipsByName[name] = ip
-
-		// remove oldest from LRU list if necessary
-		if len(s.namesByIP) > s.cacheSize {
-			oldestName := s.ll.Back().Value.(string)
-			oldestIP := s.ipsByName[oldestName]
-			delete(s.namesByIP, oldestIP)
-			delete(s.ipsByName, oldestName)
-		}
-
-		// advance sequence
-		s.ip++
-		if s.ip > maxIP {
-			// wrap IP to stay within allowed range
-			s.ip = minIP
-		}
+		ip = internal.IntToIP(s.cache.NextSequence())
+		s.cache.Add(name, ip)
 	}
-	endianness.PutUint32(fakeIP, ip)
+	fakeIP := net.IP(ip)
 	s.mx.Unlock()
 	log.Debugf("resolved %v -> %v", name, fakeIP.String())
 	answer.A = fakeIP
@@ -239,31 +233,15 @@ func (s *server) processPTRQuestion(question dns.Question) dns.RR {
 	if len(ip) != 4 {
 		return nil
 	}
-	ipInt := ipToInt(ip)
 	s.mx.Lock()
-	name, found := s.namesByIP[ipInt]
+	name, found := s.cache.NameByIP(ip.To4())
 	s.mx.Unlock()
 	if !found {
 		return nil
 	}
-	foundName := name.Value.(string)
-	log.Debugf("reversed %v -> %v", question.Name, foundName)
-	answer.Ptr = foundName + "."
+	log.Debugf("reversed %v -> %v", question.Name, name)
+	answer.Ptr = name + "."
 	return answer
-}
-
-func ipStringToInt(ip string) uint32 {
-	return ipToInt(net.ParseIP(ip))
-}
-
-func ipToInt(ip net.IP) uint32 {
-	return endianness.Uint32(ip.To4())
-}
-
-func intToIP(i uint32) net.IP {
-	ip := make(net.IP, net.IPv4len)
-	endianness.PutUint32(ip, i)
-	return ip
 }
 
 func stripTrailingDot(name string) string {

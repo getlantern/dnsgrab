@@ -3,7 +3,7 @@ package dnsgrab
 import (
 	"container/list"
 
-	"github.com/getlantern/dnsgrab/common"
+	"github.com/getlantern/dnsgrab/internal"
 )
 
 // inMemoryCache is a size bounded in-memory cache
@@ -21,12 +21,12 @@ func NewInMemoryCache(size int) Cache {
 		namesByIP: make(map[uint32]*list.Element, size),
 		ipsByName: make(map[string]uint32, size),
 		ll:        list.New(),
-		sequence:  common.MinIP,
+		sequence:  internal.MinIP,
 	}
 }
 
 func (cache *inMemoryCache) NameByIP(ip []byte) (name string, found bool) {
-	e, found := cache.namesByIP[common.IPToInt(ip)]
+	e, found := cache.namesByIP[internal.IPToInt(ip)]
 	if !found {
 		return "", false
 	}
@@ -38,11 +38,11 @@ func (cache *inMemoryCache) IPByName(name string) (ip []byte, found bool) {
 	if !found {
 		return nil, false
 	}
-	return common.IntToIP(_ip), true
+	return internal.IntToIP(_ip), true
 }
 
 func (cache *inMemoryCache) Add(name string, ip []byte) {
-	ipInt := common.IPToInt(ip)
+	ipInt := internal.IPToInt(ip)
 	// insert to front of LRU list
 	e := cache.ll.PushFront(name)
 	cache.namesByIP[ipInt] = e
@@ -60,7 +60,7 @@ func (cache *inMemoryCache) Add(name string, ip []byte) {
 }
 
 func (cache *inMemoryCache) MarkFresh(name string, ip []byte) {
-	e := cache.namesByIP[common.IPToInt(ip)]
+	e := cache.namesByIP[internal.IPToInt(ip)]
 	// move to front of LRU list
 	cache.ll.MoveToFront(e)
 }
@@ -69,9 +69,9 @@ func (cache *inMemoryCache) NextSequence() uint32 {
 	// advance sequence
 	next := cache.sequence
 	cache.sequence++
-	if cache.sequence > common.MaxIP {
+	if cache.sequence > internal.MaxIP {
 		// wrap IP to stay within allowed range
-		cache.sequence = common.MinIP
+		cache.sequence = internal.MinIP
 	}
 	return next
 }

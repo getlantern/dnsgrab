@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"github.com/getlantern/dns"
-	"github.com/getlantern/dnsgrab/common"
+	"github.com/getlantern/dnsgrab/internal"
 	"github.com/getlantern/dnsgrab/persistentcache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestInMemory(t *testing.T) {
-	doTest(t, NewInMemoryCache(2), common.MinIP)
+	doTest(t, NewInMemoryCache(2), internal.MinIP)
 }
 
 func TestPersistent(t *testing.T) {
@@ -28,14 +28,14 @@ func TestPersistent(t *testing.T) {
 	filename := filepath.Join(tmpDir, "dnsgrab.db")
 	cache, err := persistentcache.New(filename, 250*time.Millisecond)
 	require.NoError(t, err)
-	doTest(t, cache, common.MinIP)
+	doTest(t, cache, internal.MinIP)
 	cache.Close()
 
 	// Reopen cache and test again to make sure that initialization of already saved DB is handled correctly
 	time.Sleep(500 * time.Millisecond)
 	reopenedCache, err := persistentcache.New(filename, 250*time.Millisecond)
 	require.NoError(t, err)
-	doTest(t, reopenedCache, common.IPStringToInt("240.0.0.5"))
+	doTest(t, reopenedCache, internal.IPStringToInt("240.0.0.5"))
 }
 
 func doTest(t *testing.T, cache Cache, startingIP uint32) {
@@ -49,7 +49,7 @@ func doTest(t *testing.T, cache Cache, startingIP uint32) {
 	addr := s.LocalAddr().String()
 
 	test := func(name string, expectedIPInt uint32, condition string) {
-		expectedIP := common.IntToIP(expectedIPInt).String()
+		expectedIP := internal.IntToIP(expectedIPInt).String()
 		q := &dns.Msg{}
 		q.SetQuestion(name+".", dns.TypeA)
 

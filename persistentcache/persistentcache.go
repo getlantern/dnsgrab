@@ -6,7 +6,7 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/getlantern/dnsgrab/common"
+	"github.com/getlantern/dnsgrab/internal"
 	"github.com/getlantern/golog"
 )
 
@@ -34,7 +34,7 @@ func (e entry) copy() entry {
 
 func (e entry) mark() {
 	now := uint64(time.Now().UnixNano())
-	common.Endianness.PutUint64(e, now)
+	internal.Endianness.PutUint64(e, now)
 }
 
 func (e entry) expired(maxAge time.Duration) bool {
@@ -42,7 +42,7 @@ func (e entry) expired(maxAge time.Duration) bool {
 }
 
 func (e entry) tsNanos() time.Duration {
-	return time.Duration(common.Endianness.Uint64(e))
+	return time.Duration(internal.Endianness.Uint64(e))
 }
 
 func (e entry) value() []byte {
@@ -111,7 +111,7 @@ func New(filename string, maxAge time.Duration) (*PersistentCache, error) {
 		seq := ipsByName.Sequence()
 		if seq == 0 {
 			// initialize sequence to MinIP
-			ipsByName.SetSequence(uint64(common.MinIP - 1)) // we subtract 1 so that the next call to NextSequence returns MinIP
+			ipsByName.SetSequence(uint64(internal.MinIP - 1)) // we subtract 1 so that the next call to NextSequence returns MinIP
 		}
 
 		return nil
@@ -214,12 +214,12 @@ func (cache *PersistentCache) NextSequence() (next uint32) {
 		if err != nil {
 			return err
 		}
-		if _next > uint64(common.MaxIP) {
-			err = bucket.SetSequence(uint64(common.MinIP))
+		if _next > uint64(internal.MaxIP) {
+			err = bucket.SetSequence(uint64(internal.MinIP))
 			if err != nil {
 				return err
 			}
-			_next = uint64(common.MinIP)
+			_next = uint64(internal.MinIP)
 		}
 		next = uint32(_next)
 		return nil

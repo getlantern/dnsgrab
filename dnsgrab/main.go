@@ -25,8 +25,8 @@ func debugQueries(s dnsgrab.Server) {
 		ip := make([]byte, 4)
 		for id := uint32(1); id < 100000; id++ {
 			binary.BigEndian.PutUint32(ip, id)
-			name := s.ReverseLookup(ip)
-			if name == "" {
+			name, ok := s.ReverseLookup(ip)
+			if !ok {
 				break
 			}
 			fmt.Printf("%d -> %v\n", id, name)

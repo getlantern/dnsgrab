@@ -26,6 +26,8 @@ func newEntry(value []byte) []byte {
 	return e
 }
 
+// We have to copy any byte arrays returned by bolt since those are only valid during the lifetime of a transaction.
+// See https://pkg.go.dev/go.etcd.io/bbolt/#Bucket.Get
 func (e entry) copy() entry {
 	e2 := make(entry, len(e))
 	copy(e2, e)
@@ -38,7 +40,12 @@ func (e entry) mark() {
 }
 
 func (e entry) expired(maxAge time.Duration) bool {
-	return time.Duration(time.Now().UnixNano())-e.tsNanos() > maxAge
+	elapsed := time.Duration(time.Now().UnixNano()) - e.tsNanos()
+	expired := elapsed > maxAge
+	if expired {
+		log.Debugf("%v exceeds max age of %v", elapsed, maxAge)
+	}
+	return expired
 }
 
 func (e entry) tsNanos() time.Duration {
@@ -46,7 +53,15 @@ func (e entry) tsNanos() time.Duration {
 }
 
 func (e entry) value() []byte {
-	return e[8:]
+	// We have to copy any byte arrays returned by bolt since those are only valid during the lifetime of a transaction.
+	// See https://pkg.go.dev/go.etcd.io/bbolt/#Bucket.Get
+	return copySlice(e[8:])
+}
+
+func copySlice(b []byte) []byte {
+	result := make([]byte, len(b))
+	copy(result, b)
+	return result
 }
 
 // PersistentCache is an age bounded on-disk cache
@@ -60,11 +75,6 @@ func New(filename string, maxAge time.Duration) (*PersistentCache, error) {
 	db, err := bolt.Open(filename, 0644, nil)
 	if err != nil {
 		return nil, err
-	}
-
-	result := &PersistentCache{
-		db:     db,
-		maxAge: maxAge,
 	}
 
 	err = db.Update(func(tx *bolt.Tx) error {
@@ -120,7 +130,10 @@ func New(filename string, maxAge time.Duration) (*PersistentCache, error) {
 		return nil, err
 	}
 
-	return result, nil
+	return &PersistentCache{
+		db:     db,
+		maxAge: maxAge,
+	}, nil
 }
 
 // Close closes the persistent cache
@@ -140,13 +153,8 @@ func (cache *PersistentCache) NameByIP(ip []byte) (name string, found bool) {
 			name = string(_name)
 			found = true
 		} else {
-			if err := namesByIP.Delete(_name); err != nil {
-				return nil
-			}
-			ip := ipsByName.Get(_name)
-			if err := ipsByName.Delete(ip); err != nil {
-				return nil
-			}
+			namesByIP.Delete(ip)
+			ipsByName.Delete(_name)
 			name, found = "", false
 		}
 		return nil
@@ -166,11 +174,10 @@ func (cache *PersistentCache) IPByName(name string) (ip []byte, found bool) {
 		if !e.expired(cache.maxAge) {
 			found = true
 		} else {
-			if err := ipsByName.Delete(ip); err != nil {
+			if err := ipsByName.Delete(_name); err != nil {
 				return nil
 			}
-			_name := namesByIP.Get(ip)
-			if err := namesByIP.Delete(_name); err != nil {
+			if err := namesByIP.Delete(ip); err != nil {
 				return nil
 			}
 			ip, found = nil, false
@@ -194,8 +201,6 @@ func (cache *PersistentCache) Add(name string, ip []byte) {
 func (cache *PersistentCache) MarkFresh(name string, ip []byte) {
 	cache.update(func(namesByIP *bolt.Bucket, ipsByName *bolt.Bucket) error {
 		_name := []byte(name)
-		// Note, we have to copy the entries below to avoid a panic. I think that's because the
-		// slices that are returned by bolt are backed by unsafe pointers or something (not 100% sure)
 		nameEntry := entry(namesByIP.Get(ip)).copy()
 		ipEntry := entry(ipsByName.Get(_name)).copy()
 		nameEntry.mark()

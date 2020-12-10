@@ -1,40 +1,65 @@
 package dnsgrab
 
 import (
+	"io/ioutil"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/getlantern/dns"
-	"github.com/stretchr/testify/assert"
+	"github.com/getlantern/dnsgrab/internal"
+	"github.com/getlantern/dnsgrab/persistentcache"
 	"github.com/stretchr/testify/require"
 )
 
-func TestInMemory(t *testing.T) {
-	doTest(t, NewInMemoryCache(2))
+const (
+	maxAge = 2 * time.Second
+)
+
+func testInMemory(t *testing.T) {
+	doTest(t, NewInMemoryCache(2), internal.MinIP)
 }
 
-func doTest(t *testing.T, cache Cache) {
+func TestPersistent(t *testing.T) {
+	tmpDir, err := ioutil.TempDir("", "dnsgrab")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	filename := filepath.Join(tmpDir, "dnsgrab.db")
+	cache, err := persistentcache.New(filename, maxAge)
+	require.NoError(t, err)
+	doTest(t, cache, internal.MinIP)
+	cache.Close()
+
+	// Reopen cache and test again to make sure that initialization of already saved DB is handled correctly
+	time.Sleep(maxAge)
+	reopenedCache, err := persistentcache.New(filename, maxAge)
+	require.NoError(t, err)
+	doTest(t, reopenedCache, internal.IPStringToInt("240.0.0.5"))
+	cache.Close()
+}
+
+func doTest(t *testing.T, cache Cache, startingIP uint32) {
 	s, err := ListenWithCache(":0", "8.8.8.8", cache)
-	if !assert.NoError(t, err) {
-		return
-	}
+	require.NoError(t, err)
 	defer s.Close()
 	go s.Serve()
 
 	addr := s.LocalAddr().String()
 
-	test := func(name string, expectedIP string, condition string) {
+	test := func(name string, expectedIPInt uint32, condition string) {
+		expectedIP := internal.IntToIP(expectedIPInt).String()
 		q := &dns.Msg{}
 		q.SetQuestion(name+".", dns.TypeA)
 
 		a, err := dns.Exchange(q, addr)
-		if !assert.NoError(t, err) {
-			return
-		}
+		require.NoError(t, err)
 
 		fakeIP := a.Answer[0].(*dns.A).A
-		assert.Equal(t, expectedIP, fakeIP.String(), "Wrong IP from query for '%v'", condition)
+		require.Equal(t, expectedIP, fakeIP.String(), "Wrong IP from query for '%v'", condition)
 
 		q = makeSRPQuery(fakeIP.String())
 		parts := strings.Split(fakeIP.String(), ".")
@@ -43,27 +68,26 @@ func doTest(t *testing.T, cache Cache) {
 		q.SetQuestion(ipQuery, dns.TypePTR)
 
 		a, err = dns.Exchange(q, addr)
-		if !assert.NoError(t, err) {
-			return
-		}
-		log.Debugf("Num answers: %d", len(a.Answer))
-		assert.Equal(t, name+".", a.Answer[0].(*dns.PTR).Ptr, "Wrong name from reverse lookup for '%v'", condition)
+		require.NoError(t, err)
+		require.Len(t, a.Answer, 1)
+		require.Equal(t, name+".", a.Answer[0].(*dns.PTR).Ptr, "Wrong name from reverse lookup for '%v'", condition)
 		reversed, ok := s.ReverseLookup(fakeIP)
 		require.True(t, ok, "Reverse lookup failed for '%v'", condition)
-		assert.Equal(t, name, reversed, "Wrong reverse lookup for '%v'", condition)
+		require.Equal(t, name, reversed, "Wrong reverse lookup for '%v'", condition)
 	}
 
 	testUnknown := func(name string, succeed bool, ip string, condition string) {
 		reversed, ok := s.ReverseLookup(net.ParseIP(ip))
 		require.Equal(t, succeed, ok, "Unexpected reverse lookup status for '%v'", condition)
-		assert.Equal(t, name, reversed, "Wrong reverse lookup for '%v'", condition)
+		require.Equal(t, name, reversed, "Wrong reverse lookup for '%v'", condition)
 	}
 
-	test("domain1", "240.0.0.1", "first query, new IP")
-	test("domain2", "240.0.0.2", "second query, new IP")
-	test("domain1", "240.0.0.1", "repeated query, same IP")
-	test("domain3", "240.0.0.3", "third query, new IP")
-	test("domain2", "240.0.0.4", "repeated expired query, new IP")
+	test("domain1", startingIP, "first query, new IP")
+	test("domain2", startingIP+1, "second query, new IP")
+	test("domain1", startingIP, "repeated query, same IP")
+	test("domain3", startingIP+2, "third query, new IP")
+	time.Sleep(maxAge)
+	test("domain2", startingIP+3, "repeated expired query, new IP")
 
 	testUnknown("172.155.98.32", true, "172.155.98.32", "regular IP address")
 	testUnknown("", false, "240.0.10.10", "unknown fake IP address")

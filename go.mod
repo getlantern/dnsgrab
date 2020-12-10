@@ -11,4 +11,5 @@ require (
 	github.com/getlantern/netx v0.0.0-20190110220209-9912de6f94fd
 	github.com/miekg/dns v1.1.35 // indirect
 	github.com/stretchr/testify v1.5.1
+	go.etcd.io/bbolt v1.3.5
 )

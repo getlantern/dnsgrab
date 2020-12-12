@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/getlantern/dns"
+	"github.com/getlantern/dnsgrab/boltcache"
 	"github.com/getlantern/dnsgrab/internal"
-	"github.com/getlantern/dnsgrab/persistentcache"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,20 +23,20 @@ func testInMemory(t *testing.T) {
 	doTest(t, NewInMemoryCache(2), internal.MinIP)
 }
 
-func TestPersistent(t *testing.T) {
+func TestBolt(t *testing.T) {
 	tmpDir, err := ioutil.TempDir("", "dnsgrab")
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
 	filename := filepath.Join(tmpDir, "dnsgrab.db")
-	cache, err := persistentcache.New(filename, maxAge)
+	cache, err := boltcache.New(filename, maxAge)
 	require.NoError(t, err)
 	doTest(t, cache, internal.MinIP)
 	cache.Close()
 
 	// Reopen cache and test again to make sure that initialization of already saved DB is handled correctly
 	time.Sleep(maxAge)
-	reopenedCache, err := persistentcache.New(filename, maxAge)
+	reopenedCache, err := boltcache.New(filename, maxAge)
 	require.NoError(t, err)
 	doTest(t, reopenedCache, internal.IPStringToInt("240.0.0.5"))
 	cache.Close()

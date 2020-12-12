@@ -1,4 +1,4 @@
-package persistentcache
+package boltcache
 
 import (
 	"os"
@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	log = golog.LoggerFor("dnsgrab.persistentcache")
+	log = golog.LoggerFor("dnsgrab.boltcache")
 
 	namesByIPBucket = []byte("namesByIP")
 	ipsByNameBucket = []byte("ipsByName")
@@ -64,14 +64,14 @@ func copySlice(b []byte) []byte {
 	return result
 }
 
-// PersistentCache is an age bounded on-disk cache
-type PersistentCache struct {
+// Cache is an age bounded on-disk cache
+type Cache struct {
 	db *bolt.DB
 
 	maxAge time.Duration
 }
 
-func New(filename string, maxAge time.Duration) (*PersistentCache, error) {
+func New(filename string, maxAge time.Duration) (*Cache, error) {
 	db, err := bolt.Open(filename, 0644, nil)
 	if err != nil {
 		return nil, err
@@ -130,18 +130,18 @@ func New(filename string, maxAge time.Duration) (*PersistentCache, error) {
 		return nil, err
 	}
 
-	return &PersistentCache{
+	return &Cache{
 		db:     db,
 		maxAge: maxAge,
 	}, nil
 }
 
 // Close closes the persistent cache
-func (cache *PersistentCache) Close() error {
+func (cache *Cache) Close() error {
 	return cache.db.Close()
 }
 
-func (cache *PersistentCache) NameByIP(ip []byte) (name string, found bool) {
+func (cache *Cache) NameByIP(ip []byte) (name string, found bool) {
 	cache.update(func(namesByIP *bolt.Bucket, ipsByName *bolt.Bucket) error {
 		e := entry(namesByIP.Get(ip))
 		if e == nil {
@@ -162,7 +162,7 @@ func (cache *PersistentCache) NameByIP(ip []byte) (name string, found bool) {
 	return
 }
 
-func (cache *PersistentCache) IPByName(name string) (ip []byte, found bool) {
+func (cache *Cache) IPByName(name string) (ip []byte, found bool) {
 	cache.update(func(namesByIP *bolt.Bucket, ipsByName *bolt.Bucket) error {
 		_name := []byte(name)
 		e := entry(ipsByName.Get(_name))
@@ -187,7 +187,7 @@ func (cache *PersistentCache) IPByName(name string) (ip []byte, found bool) {
 	return
 }
 
-func (cache *PersistentCache) Add(name string, ip []byte) {
+func (cache *Cache) Add(name string, ip []byte) {
 	cache.update(func(namesByIP *bolt.Bucket, ipsByName *bolt.Bucket) error {
 		nameBytes := []byte(name)
 		err := namesByIP.Put(ip, newEntry(nameBytes))
@@ -198,7 +198,7 @@ func (cache *PersistentCache) Add(name string, ip []byte) {
 	})
 }
 
-func (cache *PersistentCache) MarkFresh(name string, ip []byte) {
+func (cache *Cache) MarkFresh(name string, ip []byte) {
 	cache.update(func(namesByIP *bolt.Bucket, ipsByName *bolt.Bucket) error {
 		_name := []byte(name)
 		nameEntry := entry(namesByIP.Get(ip)).copy()
@@ -212,7 +212,7 @@ func (cache *PersistentCache) MarkFresh(name string, ip []byte) {
 	})
 }
 
-func (cache *PersistentCache) NextSequence() (next uint32) {
+func (cache *Cache) NextSequence() (next uint32) {
 	err := cache.db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(ipsByNameBucket)
 		_next, err := bucket.NextSequence()
@@ -237,7 +237,7 @@ func (cache *PersistentCache) NextSequence() (next uint32) {
 	return
 }
 
-func (cache *PersistentCache) update(fn func(namesByIP *bolt.Bucket, ipsByName *bolt.Bucket) error) {
+func (cache *Cache) update(fn func(namesByIP *bolt.Bucket, ipsByName *bolt.Bucket) error) {
 	err := cache.db.Update(func(tx *bolt.Tx) error {
 		namesByIP := tx.Bucket(namesByIPBucket)
 		ipsByName := tx.Bucket(ipsByNameBucket)

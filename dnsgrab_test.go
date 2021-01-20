@@ -50,10 +50,10 @@ func doTest(t *testing.T, cache Cache, startingIP uint32) {
 
 	addr := s.LocalAddr().String()
 
-	test := func(name string, expectedIPInt uint32, condition string, queryType uint16) {
+	test := func(name string, expectedIPInt uint32, condition string) {
 		expectedIP := internal.IntToIP(expectedIPInt).String()
 		q := &dns.Msg{}
-		q.SetQuestion(name+".", queryType)
+		q.SetQuestion(name+".", dns.TypeA)
 
 		a, err := dns.Exchange(q, addr)
 		require.NoError(t, err)
@@ -82,14 +82,12 @@ func doTest(t *testing.T, cache Cache, startingIP uint32) {
 		require.Equal(t, name, reversed, "Wrong reverse lookup for '%v'", condition)
 	}
 
-	// Note - we use different query types in the below tests, but they're all interchangeable
-	// (the result of the test should be invariant with query type)
-	test("domain1", startingIP, "first query, new IP", dns.TypeA)
-	test("domain2", startingIP+1, "second query, new IP", dns.TypeSVCB)
-	test("domain1", startingIP, "repeated query, same IP", dns.TypeHTTPS)
-	test("domain3", startingIP+2, "third query, new IP", dns.TypeA)
+	test("domain1", startingIP, "first query, new IP")
+	test("domain2", startingIP+1, "second query, new IP")
+	test("domain1", startingIP, "repeated query, same IP")
+	test("domain3", startingIP+2, "third query, new IP")
 	time.Sleep(maxAge)
-	test("domain2", startingIP+3, "repeated expired query, new IP", dns.TypeHTTPS)
+	test("domain2", startingIP+3, "repeated expired query, new IP")
 
 	testUnknown("172.155.98.32", true, "172.155.98.32", "regular IP address")
 	testUnknown("", false, "240.0.10.10", "unknown fake IP address")
@@ -104,6 +102,15 @@ func doTest(t *testing.T, cache Cache, startingIP uint32) {
 	require.NoError(t, err)
 	require.Len(t, a.Answer, 1)
 	require.Equal(t, host+".", a.Answer[0].(*dns.PTR).Ptr, "Wrong name from reverse lookup of %v", host)
+
+	// And test that SVCB and HTTPS lookups are ignored
+	for _, queryType := range []uint16{dns.TypeSVCB, dns.TypeHTTPS} {
+		q = &dns.Msg{}
+		q.SetQuestion(host+".", queryType)
+		a, err = dns.Exchange(q, addr)
+		require.Error(t, err)
+		require.Nil(t, a)
+	}
 }
 
 func makeSRPQuery(ip string) *dns.Msg {

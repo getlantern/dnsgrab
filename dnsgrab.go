@@ -1,6 +1,7 @@
 package dnsgrab
 
 import (
+	"errors"
 	"net"
 	"strings"
 	"sync"
@@ -18,6 +19,8 @@ const (
 
 var (
 	log = golog.LoggerFor("dnsgrab")
+
+	ErrUnsupportedQueryType = errors.New("unsupported query type")
 )
 
 // Server is a dns server that resolves queries for A records into fake IP
@@ -33,8 +36,9 @@ type Server interface {
 	// Close closes the server's network listener.
 	Close() error
 
-	// ProcessQuery processes a DNS query and returns the response bytes.
-	ProcessQuery(b []byte) ([]byte, error)
+	// ProcessQuery processes a DNS query and returns the response bytes, the number of answers in the response, and any error encountered while
+	// processing the query.
+	ProcessQuery(b []byte) ([]byte, int, error)
 
 	// ReverseLookup resolves the given fake IP address into the original hostname. If the given IP is not a fake IP,
 	// this simply returns the provided IP in string form. If the IP is not found, this returns false.
@@ -135,7 +139,7 @@ func (s *server) ReverseLookup(ip net.IP) (string, bool) {
 	return result, true
 }
 
-func (s *server) ProcessQuery(b []byte) ([]byte, error) {
+func (s *server) ProcessQuery(b []byte) ([]byte, int, error) {
 	msgIn := &dns.Msg{}
 	msgIn.Unpack(b)
 
@@ -154,6 +158,14 @@ func (s *server) ProcessQuery(b []byte) ([]byte, error) {
 		if answer != nil {
 			msgOut.Answer = append(msgOut.Answer, answer)
 		} else {
+			if question.Qtype == dns.TypeSVCB || question.Qtype == dns.TypeHTTPS {
+				// These types of questions are optional extensions to DNS. Some clients may issue SVCB and HTTPS queries in parallel
+				// to A and AAAA queries. Because we don't know how to correctly answer SVCB and HTTPS queries, but we don't want
+				// clients using the answers from a real DNS server (which may be poisoned or return IPs that aren't well optimized
+				// for use on our proxies), we simply drop these queries
+				// See https://svn.tools.ietf.org/id/draft-ietf-dnsop-svcb-https-00.xml#client-behavior
+				continue
+			}
 			unansweredQuestions = append(unansweredQuestions, question)
 		}
 	}
@@ -163,24 +175,27 @@ func (s *server) ProcessQuery(b []byte) ([]byte, error) {
 		msgIn.Question = unansweredQuestions
 		resp, _, err := s.client.Exchange(msgIn, s.defaultDNSServer)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		msgOut.Answer = append(msgOut.Answer, resp.Answer...)
 	}
 
-	return msgOut.Pack()
+	out, err := msgOut.Pack()
+	return out, len(msgOut.Answer), err
 }
 
 func (s *server) handle(b []byte, remoteAddr *net.UDPAddr) {
-	bo, err := s.ProcessQuery(b)
+	bo, numAnswers, err := s.ProcessQuery(b)
 	if err != nil {
 		log.Error(err)
 		return
 	}
 
-	_, writeErr := s.conn.WriteToUDP(bo, remoteAddr)
-	if writeErr != nil {
-		log.Errorf("Error responding to DNS query: %v", writeErr)
+	if numAnswers > 0 {
+		_, writeErr := s.conn.WriteToUDP(bo, remoteAddr)
+		if writeErr != nil {
+			log.Errorf("Error responding to DNS query: %v", writeErr)
+		}
 	}
 }
 
@@ -209,10 +224,7 @@ func (s *server) processQuestion(question dns.Question) dns.RR {
 	if question.Qclass != dns.ClassINET {
 		return nil
 	}
-	if question.Qtype == dns.TypeA || question.Qtype == dns.TypeSVCB || question.Qtype == dns.TypeHTTPS {
-		// We handle SVCB and HTTPS queries the same way as A queries. As far as I can tell, it's legitimate
-		// to return only A records in response to such queries.
-		// See https://svn.tools.ietf.org/id/draft-ietf-dnsop-svcb-https-00.xml#authoritative-servers
+	if question.Qtype == dns.TypeA {
 		return s.processAQuestion(question)
 	}
 	if question.Qtype == dns.TypePTR {

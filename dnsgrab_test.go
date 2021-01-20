@@ -50,10 +50,10 @@ func doTest(t *testing.T, cache Cache, startingIP uint32) {
 
 	addr := s.LocalAddr().String()
 
-	test := func(name string, expectedIPInt uint32, condition string) {
+	test := func(name string, expectedIPInt uint32, condition string, queryType uint16) {
 		expectedIP := internal.IntToIP(expectedIPInt).String()
 		q := &dns.Msg{}
-		q.SetQuestion(name+".", dns.TypeA)
+		q.SetQuestion(name+".", queryType)
 
 		a, err := dns.Exchange(q, addr)
 		require.NoError(t, err)
@@ -82,12 +82,14 @@ func doTest(t *testing.T, cache Cache, startingIP uint32) {
 		require.Equal(t, name, reversed, "Wrong reverse lookup for '%v'", condition)
 	}
 
-	test("domain1", startingIP, "first query, new IP")
-	test("domain2", startingIP+1, "second query, new IP")
-	test("domain1", startingIP, "repeated query, same IP")
-	test("domain3", startingIP+2, "third query, new IP")
+	// Note - we use different query types in the below tests, but they're all interchangeable
+	// (the result of the test should be invariant with query type)
+	test("domain1", startingIP, "first query, new IP", dns.TypeA)
+	test("domain2", startingIP+1, "second query, new IP", dns.TypeSVCB)
+	test("domain1", startingIP, "repeated query, same IP", dns.TypeHTTPS)
+	test("domain3", startingIP+2, "third query, new IP", dns.TypeA)
 	time.Sleep(maxAge)
-	test("domain2", startingIP+3, "repeated expired query, new IP")
+	test("domain2", startingIP+3, "repeated expired query, new IP", dns.TypeHTTPS)
 
 	testUnknown("172.155.98.32", true, "172.155.98.32", "regular IP address")
 	testUnknown("", false, "240.0.10.10", "unknown fake IP address")

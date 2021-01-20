@@ -82,7 +82,7 @@ func ListenWithCache(listenAddr string, defaultDNSServer string, cache Cache) (S
 		defaultDNSServer: defaultDNSServer,
 		client: &dns.Client{
 			ReadTimeout: 2 * time.Second,
-			Dial:        netx.DialTimeout,
+			CustomDial:  netx.DialTimeout,
 		},
 	}
 
@@ -209,7 +209,10 @@ func (s *server) processQuestion(question dns.Question) dns.RR {
 	if question.Qclass != dns.ClassINET {
 		return nil
 	}
-	if question.Qtype == dns.TypeA {
+	if question.Qtype == dns.TypeA || question.Qtype == dns.TypeSVCB || question.Qtype == dns.TypeHTTPS {
+		// We handle SVCB and HTTPS queries the same way as A queries. As far as I can tell, it's legitimate
+		// to return only A records in response to such queries.
+		// See https://svn.tools.ietf.org/id/draft-ietf-dnsop-svcb-https-00.xml#authoritative-servers
 		return s.processAQuestion(question)
 	}
 	if question.Qtype == dns.TypePTR {

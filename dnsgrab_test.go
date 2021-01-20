@@ -20,7 +20,7 @@ const (
 )
 
 func testInMemory(t *testing.T) {
-	doTest(t, NewInMemoryCache(2), internal.MinIP)
+	doTest(t, internal.NewInMemoryCache(2), internal.MinIP)
 }
 
 func TestBolt(t *testing.T) {
@@ -42,7 +42,7 @@ func TestBolt(t *testing.T) {
 	cache.Close()
 }
 
-func doTest(t *testing.T, cache Cache, startingIP uint32) {
+func doTest(t *testing.T, cache internal.Cache, startingIP uint32) {
 	s, err := ListenWithCache(":0", "8.8.8.8", cache)
 	require.NoError(t, err)
 	defer s.Close()

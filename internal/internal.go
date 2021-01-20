@@ -18,6 +18,21 @@ var (
 	MaxIP = IPStringToInt("255.255.255.254")
 )
 
+// Cache defines the API for a cache of names to IPs and vice versa
+type Cache interface {
+	NameByIP(ip []byte) (name string, found bool)
+
+	IPByName(name string) (ip []byte, found bool)
+
+	Add(name string, ip []byte)
+
+	MarkFresh(name string, ip []byte)
+
+	NextSequence() uint32
+
+	Close() error
+}
+
 func IPStringToInt(ip string) uint32 {
 	return IPToInt(net.ParseIP(ip))
 }

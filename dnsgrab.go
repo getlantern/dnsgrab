@@ -41,21 +41,8 @@ type Server interface {
 	ReverseLookup(ip net.IP) (string, bool)
 }
 
-// Cache defines the API for a cache of names to IPs and vice versa
-type Cache interface {
-	NameByIP(ip []byte) (name string, found bool)
-
-	IPByName(name string) (ip []byte, found bool)
-
-	Add(name string, ip []byte)
-
-	MarkFresh(name string, ip []byte)
-
-	NextSequence() uint32
-}
-
 type server struct {
-	cache            Cache
+	cache            internal.Cache
 	defaultDNSServer string
 	conn             *net.UDPConn
 	client           *dns.Client
@@ -66,11 +53,11 @@ type server struct {
 // forwards queries it can't handle to the given defaultDNSServer. It uses an
 // in-memory cache constrained by cacheSize.
 func Listen(cacheSize int, listenAddr string, defaultDNSServer string) (Server, error) {
-	return ListenWithCache(listenAddr, defaultDNSServer, NewInMemoryCache(cacheSize))
+	return ListenWithCache(listenAddr, defaultDNSServer, internal.NewInMemoryCache(cacheSize))
 }
 
 // ListenWithCache is like Listen but taking any Cache implementation.
-func ListenWithCache(listenAddr string, defaultDNSServer string, cache Cache) (Server, error) {
+func ListenWithCache(listenAddr string, defaultDNSServer string, cache internal.Cache) (Server, error) {
 	_, _, err := net.SplitHostPort(defaultDNSServer)
 	if err != nil {
 		defaultDNSServer = defaultDNSServer + ":53"

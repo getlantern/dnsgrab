@@ -10,6 +10,7 @@ require (
 	github.com/getlantern/mtime v0.0.0-20200417132445-23682092d1f7 // indirect
 	github.com/getlantern/netx v0.0.0-20190110220209-9912de6f94fd
 	github.com/miekg/dns v1.1.35 // indirect
+	github.com/niubaoshu/gotiny v0.0.3 // indirect
 	github.com/stretchr/testify v1.5.1
 	go.etcd.io/bbolt v1.3.5
 )

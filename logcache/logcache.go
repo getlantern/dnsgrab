@@ -1,4 +1,4 @@
-package dnsgrab
+package logcache
 
 import (
 	"container/list"
@@ -7,7 +7,7 @@ import (
 )
 
 // inMemoryCache is a size bounded in-memory cache
-type inMemoryCache struct {
+type tinyCache struct {
 	size      int
 	namesByIP map[uint32]*list.Element
 	ipsByName map[string]uint32

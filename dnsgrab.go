@@ -60,7 +60,7 @@ type Cache interface {
 
 type server struct {
 	cache            Cache
-	defaultDNSServer string
+	defaultDNSServer func() string
 	conn             *net.UDPConn
 	client           *dns.Client
 	mx               sync.RWMutex
@@ -69,18 +69,12 @@ type server struct {
 // Listen creates a new server listening at the given listenAddr and that
 // forwards queries it can't handle to the given defaultDNSServer. It uses an
 // in-memory cache constrained by cacheSize.
-func Listen(cacheSize int, listenAddr string, defaultDNSServer string) (Server, error) {
+func Listen(cacheSize int, listenAddr string, defaultDNSServer func() string) (Server, error) {
 	return ListenWithCache(listenAddr, defaultDNSServer, NewInMemoryCache(cacheSize))
 }
 
 // ListenWithCache is like Listen but taking any Cache implementation.
-func ListenWithCache(listenAddr string, defaultDNSServer string, cache Cache) (Server, error) {
-	_, _, err := net.SplitHostPort(defaultDNSServer)
-	if err != nil {
-		defaultDNSServer = defaultDNSServer + ":53"
-		log.Debugf("Defaulted port for defaultDNSServer to 53: %v", defaultDNSServer)
-	}
-
+func ListenWithCache(listenAddr string, defaultDNSServer func() string, cache Cache) (Server, error) {
 	s := &server{
 		cache:            cache,
 		defaultDNSServer: defaultDNSServer,
@@ -101,6 +95,16 @@ func ListenWithCache(listenAddr string, defaultDNSServer string, cache Cache) (S
 
 	log.Debugf("Listening at: %v", s.conn.LocalAddr())
 	return s, nil
+}
+
+func (s *server) getDefaultDNSServer() string {
+	defaultDNSServer := s.defaultDNSServer()
+	_, _, err := net.SplitHostPort(defaultDNSServer)
+	if err != nil {
+		defaultDNSServer = defaultDNSServer + ":53"
+		log.Debugf("Defaulted port for defaultDNSServer to 53: %v", defaultDNSServer)
+	}
+	return defaultDNSServer
 }
 
 func (s *server) LocalAddr() net.Addr {
@@ -126,7 +130,8 @@ func (s *server) Close() error {
 }
 
 func (s *server) ReverseLookup(ip net.IP) (string, bool) {
-	ipInt := internal.IPToInt(ip)
+	// grab the last 4 bytes of the IP to account for fake IPv6 addresses
+	ipInt := internal.IPToInt(ip[len(ip)-4:])
 	if ipInt < internal.MinIP || ipInt > internal.MaxIP {
 		return ip.String(), true
 	}
@@ -173,7 +178,7 @@ func (s *server) ProcessQuery(b []byte) ([]byte, int, error) {
 	if len(unansweredQuestions) > 0 {
 		log.Debugf("Passing unanswered questions along: %v", unansweredQuestions)
 		msgIn.Question = unansweredQuestions
-		resp, _, err := s.client.Exchange(msgIn, s.defaultDNSServer)
+		resp, _, err := s.client.Exchange(msgIn, s.getDefaultDNSServer())
 		if err != nil {
 			return nil, 0, err
 		}
@@ -203,7 +208,27 @@ func (s *server) processAQuestion(question dns.Question) dns.RR {
 	answer := &dns.A{}
 	// Short TTL should be fine since these DNS lookups are local and should be quite cheap
 	answer.Hdr = dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 1}
-	name := stripTrailingDot(question.Name)
+	fakeIP := s.getCachedFakeIP(question.Name)
+	answer.A = fakeIP
+	log.Debugf("resolved %v -> %v", question.Name, answer.A)
+	return answer
+}
+
+func (s *server) processAAAAQuestion(question dns.Question) dns.RR {
+	answer := &dns.AAAA{}
+	// Short TTL should be fine since these DNS lookups are local and should be quite cheap
+	answer.Hdr = dns.RR_Header{Name: question.Name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 1}
+	fakeIP := s.getCachedFakeIP(question.Name)
+	// copy the fake IP into the last 4 bytes of a 16 byte IPv6 address
+	fakeIPv6 := make(net.IP, net.IPv6len)
+	copy(fakeIPv6[12:], fakeIP)
+	answer.AAAA = fakeIPv6
+	log.Debugf("resolved %v -> %v", question.Name, answer.AAAA)
+	return answer
+}
+
+func (s *server) getCachedFakeIP(name string) net.IP {
+	name = stripTrailingDot(name)
 	s.mx.Lock()
 	ip, found := s.cache.IPByName(name)
 	if found {
@@ -213,24 +238,25 @@ func (s *server) processAQuestion(question dns.Question) dns.RR {
 		ip = internal.IntToIP(s.cache.NextSequence())
 		s.cache.Add(name, ip)
 	}
-	fakeIP := net.IP(ip)
 	s.mx.Unlock()
-	log.Debugf("resolved %v -> %v", name, fakeIP.String())
-	answer.A = fakeIP
-	return answer
+	result := net.IP(ip)
+	return result
 }
 
 func (s *server) processQuestion(question dns.Question) dns.RR {
 	if question.Qclass != dns.ClassINET {
 		return nil
 	}
-	if question.Qtype == dns.TypeA {
+	switch question.Qtype {
+	case dns.TypeA:
 		return s.processAQuestion(question)
-	}
-	if question.Qtype == dns.TypePTR {
+	case dns.TypeAAAA:
+		return s.processAAAAQuestion(question)
+	case dns.TypePTR:
 		return s.processPTRQuestion(question)
+	default:
+		return nil
 	}
-	return nil
 }
 
 func (s *server) processPTRQuestion(question dns.Question) dns.RR {

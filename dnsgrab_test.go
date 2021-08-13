@@ -43,7 +43,7 @@ func TestPersistent(t *testing.T) {
 }
 
 func doTest(t *testing.T, cache Cache, startingIP uint32) {
-	s, err := ListenWithCache(":0", "8.8.8.8", cache)
+	s, err := ListenWithCache(":0", func() string { return "8.8.8.8" }, cache)
 	require.NoError(t, err)
 	defer s.Close()
 	go s.Serve()

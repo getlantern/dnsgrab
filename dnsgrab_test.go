@@ -76,6 +76,14 @@ func doTest(t *testing.T, cache Cache, startingIP uint32) {
 		require.Equal(t, name, reversed, "Wrong reverse lookup for '%v'", condition)
 	}
 
+	testError := func(name string) {
+		q := &dns.Msg{}
+		q.SetQuestion(name+".", dns.TypeA)
+
+		_, err := dns.Exchange(q, addr)
+		require.Error(t, err)
+	}
+
 	testUnknown := func(name string, succeed bool, ip string, condition string) {
 		reversed, ok := s.ReverseLookup(net.ParseIP(ip))
 		require.Equal(t, succeed, ok, "Unexpected reverse lookup status for '%v'", condition)
@@ -88,6 +96,7 @@ func doTest(t *testing.T, cache Cache, startingIP uint32) {
 	test("domain3", startingIP+2, "third query, new IP")
 	time.Sleep(maxAge)
 	test("domain2", startingIP+3, "repeated expired query, new IP")
+	testError("")
 
 	testUnknown("172.155.98.32", true, "172.155.98.32", "regular IP address")
 	testUnknown("", false, "240.0.10.10", "unknown fake IP address")

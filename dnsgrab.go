@@ -205,20 +205,26 @@ func (s *server) handle(b []byte, remoteAddr *net.UDPAddr) {
 }
 
 func (s *server) processAQuestion(question dns.Question) dns.RR {
+	fakeIP := s.getCachedFakeIP(question.Name)
+	if fakeIP == nil {
+		return nil
+	}
 	answer := &dns.A{}
 	// Short TTL should be fine since these DNS lookups are local and should be quite cheap
 	answer.Hdr = dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 1}
-	fakeIP := s.getCachedFakeIP(question.Name)
 	answer.A = fakeIP
 	log.Debugf("resolved %v -> %v", question.Name, answer.A)
 	return answer
 }
 
 func (s *server) processAAAAQuestion(question dns.Question) dns.RR {
+	fakeIP := s.getCachedFakeIP(question.Name)
+	if fakeIP == nil {
+		return nil
+	}
 	answer := &dns.AAAA{}
 	// Short TTL should be fine since these DNS lookups are local and should be quite cheap
 	answer.Hdr = dns.RR_Header{Name: question.Name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 1}
-	fakeIP := s.getCachedFakeIP(question.Name)
 	// copy the fake IP into the last 4 bytes of a 16 byte IPv6 address
 	fakeIPv6 := make(net.IP, net.IPv6len)
 	copy(fakeIPv6[12:], fakeIP)
@@ -229,6 +235,9 @@ func (s *server) processAAAAQuestion(question dns.Question) dns.RR {
 
 func (s *server) getCachedFakeIP(name string) net.IP {
 	name = stripTrailingDot(name)
+	if name == "" {
+		return nil
+	}
 	s.mx.Lock()
 	ip, found := s.cache.IPByName(name)
 	if found {

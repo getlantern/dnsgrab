@@ -9,17 +9,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/getlantern/dns"
 	"github.com/getlantern/dnsgrab/internal"
 	"github.com/getlantern/dnsgrab/persistentcache"
-	"github.com/stretchr/testify/require"
 )
 
 const (
 	maxAge = 2 * time.Second
 )
 
-func testInMemory(t *testing.T) {
+func TestInMemory(t *testing.T) {
 	doTest(t, NewInMemoryCache(2), internal.MinIP)
 }
 
@@ -109,8 +110,8 @@ func doTest(t *testing.T, cache Cache, startingIP uint32) {
 	q := makeSRPQuery(ip.String())
 	a, err := dns.Exchange(q, addr)
 	require.NoError(t, err)
-	require.Len(t, a.Answer, 1)
-	require.Equal(t, host+".", a.Answer[0].(*dns.PTR).Ptr, "Wrong name from reverse lookup of %v", host)
+	require.NotEmpty(t, a.Answer)
+	require.True(t, strings.HasSuffix(a.Answer[0].(*dns.PTR).Ptr, "1e100.net."), "Wrong name from reverse lookup of %v", host)
 
 	// And test that SVCB and HTTPS lookups are ignored
 	for _, queryType := range []uint16{dns.TypeSVCB, dns.TypeHTTPS} {

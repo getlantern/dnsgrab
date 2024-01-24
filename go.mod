@@ -3,7 +3,7 @@ module github.com/getlantern/dnsgrab
 go 1.21
 
 require (
-	github.com/getlantern/dns v0.0.0-20210120185712-8d005533efa0
+	github.com/getlantern/dns v0.0.0-20240124032733-9a3302908228
 	github.com/getlantern/golog v0.0.0-20230503153817-8e72de7e0a65
 	github.com/getlantern/netx v0.0.0-20211206143627-7ccfeb739cbd
 	github.com/stretchr/testify v1.8.4
@@ -32,6 +32,8 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.26.0 // indirect
 	golang.org/x/crypto v0.18.0 // indirect
+	golang.org/x/mod v0.14.0 // indirect
 	golang.org/x/net v0.20.0 // indirect
 	golang.org/x/sys v0.16.0 // indirect
+	golang.org/x/tools v0.17.0 // indirect
 )
